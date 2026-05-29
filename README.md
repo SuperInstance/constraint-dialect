@@ -1,125 +1,81 @@
-# MLIR Constraint Dialect
+# constraint-dialect
 
-An MLIR dialect for the **SuperInstance** ecosystem that encodes harmonic, rhythmic, and spectral constraints as first-class IR operations. It models musical sequences, voice leading, harmonic tension, and tradition-space dials, then lowers them through affine loops to LLVM IR.
+MLIR dialect for constraint operations — custom ops for `constraint.sequence`, `constraint.tension`, `constraint.conserve` with lowering to Affine and LLVM IR.
+
+## What This Gives You
+
+- **Custom MLIR ops** — first-class constraint operations in the MLIR framework
+- **Constraint-specific types** — lattice points, deadband funnels, tension graphs
+- **Progressive lowering** — constraint dialect → Affine → LLVM IR → machine code
+- **Optimization passes** — constraint-aware constant folding, dead code elimination, and fusion
+- **LLVM integration** — plugs into the standard MLIR/LLVM pipeline
+
+## Quick Start
+
+```mlir
+// constraint.sequence — a temporal constraint pipeline
+func.func @verify_system(%points: memref<100xf64>) -> i1 {
+  %snapped = constraint.sequence(%points) {
+    constraint.snap { lattice = #constraint.eisenstein_a2 },
+    constraint.funnel { decay = 0.1 : f64, tolerance = 0.001 : f64 },
+    constraint.conserve { modulus = 48 : i32 }
+  }
+  return %snapped : i1
+}
+```
+
+### Building the Dialect
+
+```bash
+mkdir build && cd build
+cmake .. -G Ninja -DLLVM_ENABLE_PROJECTS=mlir
+ninja constraint-dialect
+ninja check-constraint-dialect  # run tests
+```
+
+## Dialect Operations
+
+| Op | Description |
+|---|---|
+| `constraint.snap` | Quantize to lattice (Eisenstein A₂ or Z²) |
+| `constraint.tension` | Compute tension in constraint graph |
+| `constraint.conserve` | Check conservation invariant |
+| `constraint.sequence` | Chain of constraint operations |
+| `constraint.funnel` | Apply deadband funnel with decay |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Constraint MLIR Dialect            │
-│  sequence · tension · dial · tradition          │
-│  voice_lead · conserve                          │
-└──────────────────────┬──────────────────────────┘
-                       │  ConstraintToAffine
-                       ▼
-┌─────────────────────────────────────────────────┐
-│              Affine + Arith + MemRef            │
-│  (loop nests, memory ops, constants)            │
-└──────────────────────┬──────────────────────────┘
-                       │  ConvertToLLVM (upstream)
-                       ▼
-┌─────────────────────────────────────────────────┐
-│                  LLVM IR                        │
-└──────────────────────┬──────────────────────────┘
-                       │  llc / JIT
-                       ▼
-                  Native Code
+constraint.dialect
+       │
+       ▼
+    Affine Dialect
+       │
+       ▼
+    LLVM IR
+       │
+       ▼
+   Machine Code
 ```
 
-### Conservation Pipeline
+## How It Fits
 
-```
-constraint.tension ops ──► sum I_vert ──► compute I_horiz
-       │                                      │
-       └──── constraint.conserve ◄────────────┘
-            (|I_vert + I_horiz - expected| < 0.15)
-```
+The **compiler integration** layer of the constraint theory ecosystem:
 
-## Operations
+- [constraint-theory-core](https://github.com/SuperInstance/constraint-theory-core) — theory primitives that the dialect encodes
+- [constraint-theory-engine-cpp-lua](https://github.com/SuperInstance/constraint-theory-engine-cpp-lua) — C++ engine with LLVM IR emitter
+- [flux-compiler-workspace](https://github.com/SuperInstance/flux-compiler-workspace) — FLUX compiler using this dialect
+- [constraint-substrate](https://github.com/SuperInstance/constraint-substrate) — cross-language primitives for lowering targets
 
-| Operation | Description |
-|---|---|
-| `constraint.sequence` | Musical sequence of pitch classes (0–11) |
-| `constraint.tension` | Harmonic tension I_vert of a sequence |
-| `constraint.dial` | 3D position in tradition space |
-| `constraint.tradition` | Named tradition dial lookup |
-| `constraint.voice_lead` | Minimal voice-leading distance |
-| `constraint.conserve` | Conservation constraint check |
-
-## Custom Types
-
-| Type | Lowered To |
-|---|---|
-| `!constraint.Sequence` | `memref<?xi32>` |
-| `!constraint.Dial` | `tuple<f64, f64, f64>` |
-| `!constraint.VoiceLeading` | `memref<?xi32>` |
-
-## Build Instructions
-
-**Requirements:** LLVM 17+ built with MLIR enabled.
+## Testing
 
 ```bash
-# Clone
-git clone https://github.com/SuperInstance/constraint-dialect.git
-cd constraint-dialect
-
-# Build against an existing LLVM/MLIR installation
-mkdir build && cd build
-cmake .. \
-  -DMLIR_DIR=$(llvm-config --cmakedir) \
-  -DCMAKE_BUILD_TYPE=Release
-cmake --build .
-
-# Run tests
-cmake --build . --target check-constraint
+ninja check-constraint-dialect
 ```
 
-### Using the `constraint-opt` Tool
+## Installation
 
-```bash
-# Parse and verify
-./bin/constraint-opt test/basic.mlir
-
-# Lower to affine
-./bin/constraint-opt test/lowering.mlir --convert-constraint-to-affine
-
-# Check conservation
-./bin/constraint-opt test/conservation.mlir --check-conservation
-```
-
-## Example MLIR
-
-```mlir
-// Define a C major triad as a sequence
-%seq = constraint.sequence notes = [0, 4, 7] : !constraint.Sequence
-
-// Compute its harmonic tension
-%t = constraint.tension %seq : f64
-
-// Define a dial position
-%dial = constraint.dial harmonic = 0.8, rhythmic = 0.5, spectral = 0.3
-  : !constraint.Dial
-
-// Look up a tradition
-%jazz = constraint.tradition name = "jazz" : !constraint.Dial
-
-// Voice lead between two sequences
-%seq2 = constraint.sequence notes = [0, 5, 7] : !constraint.Sequence
-%vl = constraint.voice_lead %seq, %seq2 : f64
-
-// Conservation check
-%ok = constraint.conserve %t, %vl {
-  expected_sum = 4.2,
-  tolerance = 0.15
-} : i1
-```
-
-## Integration with SuperInstance Ecosystem
-
-- **[constraint-toolkit](https://github.com/SuperInstance/constraint-toolkit)** — Python bindings and analysis tools that generate Constraint MLIR
-- **[constraint-audio](https://github.com/SuperInstance/constraint-audio)** — Audio rendering pipeline that consumes lowered IR for real-time synthesis
-
-The dialect acts as the compiler intermediate layer: Python tools emit `.mlir` files using this dialect, and the audio backend consumes the lowered LLVM IR for low-latency DSP.
+Requires LLVM/MLIR development build. See [MLIR getting started](https://mlir.llvm.org/getting_started/).
 
 ## License
 
