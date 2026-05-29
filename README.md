@@ -80,3 +80,7 @@ Requires LLVM/MLIR development build. See [MLIR getting started](https://mlir.ll
 ## License
 
 MIT
+
+## Documentation
+
+📚 [OpenConstruct Docs](https://github.com/SuperInstance/openconstruct-docs)
